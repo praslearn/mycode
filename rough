@@ -81,6 +81,7 @@ windows-image-builder-template.json:{
 
 =======
 azure-pipelines.yml :
+
 trigger:
 - main
 
@@ -111,23 +112,29 @@ stages:
         echo "Replacing Linux script path in JSON template..."
         sed -i 's|{{linuxScriptPath}}|'$linuxScriptPath'|g' $(linuxTemplateFile)
 
-        echo "Creating resource group..."
-        az group create --name $(resourceGroupName) --location $(location)
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'AzureSPConnection'  # Name of your SP connection
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Creating resource group..."
+          az group create --name $(resourceGroupName) --location $(location)
 
-        echo "Creating Linux Image Builder template..."
-        az resource create \
-          --resource-group $(resourceGroupName) \
-          --properties @$(linuxTemplateFile) \
-          --is-full-object \
-          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-          --name $(linuxImageTemplateName)
+          echo "Creating Linux Image Builder template..."
+          az resource create \
+            --resource-group $(resourceGroupName) \
+            --properties @$(linuxTemplateFile) \
+            --is-full-object \
+            --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+            --name $(linuxImageTemplateName)
 
-        echo "Running Linux image build..."
-        az resource invoke-action \
-          --resource-group $(resourceGroupName) \
-          --action Run \
-          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-          --name $(linuxImageTemplateName)
+          echo "Running Linux image build..."
+          az resource invoke-action \
+            --resource-group $(resourceGroupName) \
+            --action Run \
+            --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+            --name $(linuxImageTemplateName)
 
   - job: WindowsImageBuilder
     displayName: 'Windows VM Image Builder'
@@ -139,23 +146,29 @@ stages:
         echo "Replacing Windows script path in JSON template..."
         sed -i 's|{{windowsScriptPath}}|'$windowsScriptPath'|g' $(windowsTemplateFile)
 
-        echo "Creating resource group..."
-        az group create --name $(resourceGroupName) --location $(location)
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'AzureSPConnection'  # Name of your SP connection
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "Creating resource group..."
+          az group create --name $(resourceGroupName) --location $(location)
 
-        echo "Creating Windows Image Builder template..."
-        az resource create \
-          --resource-group $(resourceGroupName) \
-          --properties @$(windowsTemplateFile) \
-          --is-full-object \
-          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-          --name $(windowsImageTemplateName)
+          echo "Creating Windows Image Builder template..."
+          az resource create \
+            --resource-group $(resourceGroupName) \
+            --properties @$(windowsTemplateFile) \
+            --is-full-object \
+            --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+            --name $(windowsImageTemplateName)
 
-        echo "Running Windows image build..."
-        az resource invoke-action \
-          --resource-group $(resourceGroupName) \
-          --action Run \
-          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-          --name $(windowsImageTemplateName)
+          echo "Running Windows image build..."
+          az resource invoke-action \
+            --resource-group $(resourceGroupName) \
+            --action Run \
+            --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+            --name $(windowsImageTemplateName)
 
 =========
 
