@@ -1,0 +1,179 @@
+linux-image-builder-template.json:
+
+{
+  "type": "Microsoft.VirtualMachineImages/imageTemplates",
+  "apiVersion": "2022-07-01",
+  "location": "eastus",
+  "properties": {
+    "buildTimeoutInMinutes": 60,
+    "vmProfile": {
+      "vmSize": "Standard_D2s_v3"
+    },
+    "source": {
+      "type": "PlatformImage",
+      "publisher": "Canonical",
+      "offer": "UbuntuServer",
+      "sku": "18.04-LTS",
+      "version": "latest"
+    },
+    "customize": [
+      {
+        "type": "Shell",
+        "name": "InstallApp",
+        "scriptUri": "{{linuxScriptUri}}"
+      }
+    ],
+    "distribute": [
+      {
+        "type": "GalleryImageVersion",
+        "galleryImageId": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/galleries/<gallery-name>/images/<linux-image-definition>",
+        "location": ["eastus"],
+        "replicationRegions": ["westus"],
+        "excludeFromLatest": false,
+        "osType": "Linux",
+        "runOutputName": "linuxImageOutput"
+      }
+    ]
+  }
+}
+
+
+
+=====
+
+windows-image-builder-template.json:
+
+{
+  "type": "Microsoft.VirtualMachineImages/imageTemplates",
+  "apiVersion": "2022-07-01",
+  "location": "eastus",
+  "properties": {
+    "buildTimeoutInMinutes": 60,
+    "vmProfile": {
+      "vmSize": "Standard_D2s_v3"
+    },
+    "source": {
+      "type": "PlatformImage",
+      "publisher": "MicrosoftWindowsServer",
+      "offer": "WindowsServer",
+      "sku": "2019-Datacenter",
+      "version": "latest"
+    },
+    "customize": [
+      {
+        "type": "PowerShell",
+        "name": "InstallApp",
+        "scriptUri": "{{windowsScriptUri}}"
+      }
+    ],
+    "distribute": [
+      {
+        "type": "GalleryImageVersion",
+        "galleryImageId": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/galleries/<gallery-name>/images/<windows-image-definition>",
+        "location": ["eastus"],
+        "replicationRegions": ["westus"],
+        "excludeFromLatest": false,
+        "osType": "Windows",
+        "runOutputName": "windowsImageOutput"
+      }
+    ]
+  }
+}
+
+
+=======
+azure-pipelines.yml :
+
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  resourceGroupName: 'your-resource-group'
+  location: 'eastus'
+  linuxImageTemplateName: 'linuxImageTemplate'
+  windowsImageTemplateName: 'windowsImageTemplate'
+  linuxTemplateFile: 'linux-image-builder-template.json'
+  windowsTemplateFile: 'windows-image-builder-template.json'
+  linuxScriptPath: 'scripts/install_linux.sh'  # Path to Linux script in repo
+  windowsScriptPath: 'scripts/install_windows.ps1'  # Path to Windows script in repo
+
+steps:
+
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: $(Build.SourcesDirectory)/scripts  # The folder containing your script files
+    artifact: scripts
+
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: '<your-service-connection>'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      # Upload Linux and Windows scripts to a storage account or retrieve URLs from repo
+      # Example: Assuming the scripts are uploaded to a storage account
+      echo "Uploading Linux script to storage account..."
+      linuxScriptUri="https://<storage-account>.blob.core.windows.net/scripts/install_linux.sh"
+      
+      echo "Uploading Windows script to storage account..."
+      windowsScriptUri="https://<storage-account>.blob.core.windows.net/scripts/install_windows.ps1"
+
+      # Replace placeholders in the Linux image builder template
+      echo "Replacing Linux script URL in JSON template..."
+      sed -i 's|{{linuxScriptUri}}|'$linuxScriptUri'|g' $(linuxTemplateFile)
+      
+      # Replace placeholders in the Windows image builder template
+      echo "Replacing Windows script URL in JSON template..."
+      sed -i 's|{{windowsScriptUri}}|'$windowsScriptUri'|g' $(windowsTemplateFile)
+
+      # Create resource group
+      echo "Creating resource group..."
+      az group create --name $(resourceGroupName) --location $(location)
+
+      # Create and run the Linux image builder
+      echo "Creating Linux Image Builder template..."
+      az resource create \
+        --resource-group $(resourceGroupName) \
+        --properties @$(linuxTemplateFile) \
+        --is-full-object \
+        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+        --name $(linuxImageTemplateName)
+
+      echo "Running Linux image build..."
+      az resource invoke-action \
+        --resource-group $(resourceGroupName) \
+        --action Run \
+        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+        --name $(linuxImageTemplateName)
+
+      echo "Creating Windows Image Builder template..."
+      az resource create \
+        --resource-group $(resourceGroupName) \
+        --properties @$(windowsTemplateFile) \
+        --is-full-object \
+        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+        --name $(windowsImageTemplateName)
+
+      echo "Running Windows image build..."
+      az resource invoke-action \
+        --resource-group $(resourceGroupName) \
+        --action Run \
+        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+        --name $(windowsImageTemplateName)
+
+
+=========
+
+install_linux.sh
+#!/bin/bash
+sudo apt-get update
+sudo apt-get install -y nginx
+
+-=---
+install_windows.ps1
+
+# PowerShell script to install IIS
+Install-WindowsFeature -name Web-Server -IncludeManagementTools
