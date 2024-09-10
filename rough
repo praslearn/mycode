@@ -20,7 +20,7 @@ linux-image-builder-template.json:
       {
         "type": "Shell",
         "name": "InstallApp",
-        "scriptUri": "{{linuxScriptUri}}"
+        "scriptUri": "{{linuxScriptPath}}"
       }
     ],
     "distribute": [
@@ -38,12 +38,9 @@ linux-image-builder-template.json:
 }
 
 
-
 =====
 
-windows-image-builder-template.json:
-
-{
+windows-image-builder-template.json:{
   "type": "Microsoft.VirtualMachineImages/imageTemplates",
   "apiVersion": "2022-07-01",
   "location": "eastus",
@@ -63,7 +60,7 @@ windows-image-builder-template.json:
       {
         "type": "PowerShell",
         "name": "InstallApp",
-        "scriptUri": "{{windowsScriptUri}}"
+        "scriptUri": "{{windowsScriptPath}}"
       }
     ],
     "distribute": [
@@ -81,9 +78,9 @@ windows-image-builder-template.json:
 }
 
 
+
 =======
 azure-pipelines.yml :
-
 trigger:
 - main
 
@@ -97,73 +94,68 @@ variables:
   windowsImageTemplateName: 'windowsImageTemplate'
   linuxTemplateFile: 'linux-image-builder-template.json'
   windowsTemplateFile: 'windows-image-builder-template.json'
-  linuxScriptPath: 'scripts/install_linux.sh'  # Path to Linux script in repo
-  windowsScriptPath: 'scripts/install_windows.ps1'  # Path to Windows script in repo
+  linuxScriptPath: '$(Build.SourcesDirectory)/scripts/install_linux.sh'  # Path to Linux script in repo
+  windowsScriptPath: '$(Build.SourcesDirectory)/scripts/install_windows.ps1'  # Path to Windows script in repo
 
-steps:
+stages:
+- stage: BuildImages
+  displayName: 'Build and Distribute VM Images (Linux and Windows)'
+  jobs:
+  - job: LinuxImageBuilder
+    displayName: 'Linux VM Image Builder'
+    steps:
+    - task: Checkout@2
+      inputs:
+        clean: true  # Clean the repository
+    - script: |
+        echo "Replacing Linux script path in JSON template..."
+        sed -i 's|{{linuxScriptPath}}|'$linuxScriptPath'|g' $(linuxTemplateFile)
 
-- task: PublishPipelineArtifact@1
-  inputs:
-    targetPath: $(Build.SourcesDirectory)/scripts  # The folder containing your script files
-    artifact: scripts
+        echo "Creating resource group..."
+        az group create --name $(resourceGroupName) --location $(location)
 
-- task: AzureCLI@2
-  inputs:
-    azureSubscription: '<your-service-connection>'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      # Upload Linux and Windows scripts to a storage account or retrieve URLs from repo
-      # Example: Assuming the scripts are uploaded to a storage account
-      echo "Uploading Linux script to storage account..."
-      linuxScriptUri="https://<storage-account>.blob.core.windows.net/scripts/install_linux.sh"
-      
-      echo "Uploading Windows script to storage account..."
-      windowsScriptUri="https://<storage-account>.blob.core.windows.net/scripts/install_windows.ps1"
+        echo "Creating Linux Image Builder template..."
+        az resource create \
+          --resource-group $(resourceGroupName) \
+          --properties @$(linuxTemplateFile) \
+          --is-full-object \
+          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+          --name $(linuxImageTemplateName)
 
-      # Replace placeholders in the Linux image builder template
-      echo "Replacing Linux script URL in JSON template..."
-      sed -i 's|{{linuxScriptUri}}|'$linuxScriptUri'|g' $(linuxTemplateFile)
-      
-      # Replace placeholders in the Windows image builder template
-      echo "Replacing Windows script URL in JSON template..."
-      sed -i 's|{{windowsScriptUri}}|'$windowsScriptUri'|g' $(windowsTemplateFile)
+        echo "Running Linux image build..."
+        az resource invoke-action \
+          --resource-group $(resourceGroupName) \
+          --action Run \
+          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+          --name $(linuxImageTemplateName)
 
-      # Create resource group
-      echo "Creating resource group..."
-      az group create --name $(resourceGroupName) --location $(location)
+  - job: WindowsImageBuilder
+    displayName: 'Windows VM Image Builder'
+    steps:
+    - task: Checkout@2
+      inputs:
+        clean: true  # Clean the repository
+    - script: |
+        echo "Replacing Windows script path in JSON template..."
+        sed -i 's|{{windowsScriptPath}}|'$windowsScriptPath'|g' $(windowsTemplateFile)
 
-      # Create and run the Linux image builder
-      echo "Creating Linux Image Builder template..."
-      az resource create \
-        --resource-group $(resourceGroupName) \
-        --properties @$(linuxTemplateFile) \
-        --is-full-object \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(linuxImageTemplateName)
+        echo "Creating resource group..."
+        az group create --name $(resourceGroupName) --location $(location)
 
-      echo "Running Linux image build..."
-      az resource invoke-action \
-        --resource-group $(resourceGroupName) \
-        --action Run \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(linuxImageTemplateName)
+        echo "Creating Windows Image Builder template..."
+        az resource create \
+          --resource-group $(resourceGroupName) \
+          --properties @$(windowsTemplateFile) \
+          --is-full-object \
+          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+          --name $(windowsImageTemplateName)
 
-      echo "Creating Windows Image Builder template..."
-      az resource create \
-        --resource-group $(resourceGroupName) \
-        --properties @$(windowsTemplateFile) \
-        --is-full-object \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(windowsImageTemplateName)
-
-      echo "Running Windows image build..."
-      az resource invoke-action \
-        --resource-group $(resourceGroupName) \
-        --action Run \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(windowsImageTemplateName)
-
+        echo "Running Windows image build..."
+        az resource invoke-action \
+          --resource-group $(resourceGroupName) \
+          --action Run \
+          --resource-type Microsoft.VirtualMachineImages/imageTemplates \
+          --name $(windowsImageTemplateName)
 
 =========
 
