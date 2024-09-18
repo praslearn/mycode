@@ -1,205 +1,62 @@
-report:
-**Analysis Report on Unity Catalog Server in Azure VM**
-
-The recent exploration of setting up a Unity Catalog server in an Azure VM, which was tested and validated with my teammate, Mr. X, has provided valuable insights. The current implementation of the Unity Catalog server, when deployed as a standalone solution, is limited primarily to viewing purposes. Beyond this, there is no significant functionality or operational value that can be derived from this setup. While it serves as a centralized interface for viewing metadata or cataloged data assets, it lacks advanced features such as data management or interaction with datasets.
-
-We also considered the option of integrating Unity Catalog with platforms like DuckDB or Azure Databricks to enhance its capabilities. However, upon evaluation, this integration appears to be less promising due to several challenges. Primarily, there is a lack of proper documentation or guidance available on how to carry out these integrations effectively. This would require substantial time and effort, and without clear examples or support, the likelihood of deriving meaningful value from this integration seems low. The combination of limited use cases and potential complexity makes it an endeavor that may not be worth pursuing further at this time.
-
-In conclusion, while Unity Catalog offers potential in specific environments, its current standalone setup in an Azure VM lacks the depth and functionality needed for broader application. Given the limited benefits and the challenges of integration with other platforms, I recommend concluding further exploration of this topic unless more comprehensive documentation or use cases become available.
-----
-
-
-linux-image-builder-template.json:
-
-{
-  "type": "Microsoft.VirtualMachineImages/imageTemplates",
-  "apiVersion": "2022-07-01",
-  "location": "eastus",
-  "properties": {
-    "buildTimeoutInMinutes": 60,
-    "vmProfile": {
-      "vmSize": "Standard_D2s_v3"
-    },
-    "source": {
-      "type": "PlatformImage",
-      "publisher": "Canonical",
-      "offer": "UbuntuServer",
-      "sku": "18.04-LTS",
-      "version": "latest"
-    },
-    "customize": [
-      {
-        "type": "Shell",
-        "name": "InstallApp",
-        "scriptUri": "{{linuxScriptPath}}"
-      }
-    ],
-    "distribute": [
-      {
-        "type": "GalleryImageVersion",
-        "galleryImageId": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/galleries/<gallery-name>/images/<linux-image-definition>",
-        "location": ["eastus"],
-        "replicationRegions": ["westus"],
-        "excludeFromLatest": false,
-        "osType": "Linux",
-        "runOutputName": "linuxImageOutput"
-      }
-    ]
-  }
-}
-
-
-=====
-
-windows-image-builder-template.json:{
-  "type": "Microsoft.VirtualMachineImages/imageTemplates",
-  "apiVersion": "2022-07-01",
-  "location": "eastus",
-  "properties": {
-    "buildTimeoutInMinutes": 60,
-    "vmProfile": {
-      "vmSize": "Standard_D2s_v3"
-    },
-    "source": {
-      "type": "PlatformImage",
-      "publisher": "MicrosoftWindowsServer",
-      "offer": "WindowsServer",
-      "sku": "2019-Datacenter",
-      "version": "latest"
-    },
-    "customize": [
-      {
-        "type": "PowerShell",
-        "name": "InstallApp",
-        "scriptUri": "{{windowsScriptPath}}"
-      }
-    ],
-    "distribute": [
-      {
-        "type": "GalleryImageVersion",
-        "galleryImageId": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Compute/galleries/<gallery-name>/images/<windows-image-definition>",
-        "location": ["eastus"],
-        "replicationRegions": ["westus"],
-        "excludeFromLatest": false,
-        "osType": "Windows",
-        "runOutputName": "windowsImageOutput"
-      }
-    ]
-  }
-}
-
-
-
-=======
-azure-pipelines.yml :
-
 trigger:
 - main
 
 pool:
   vmImage: 'ubuntu-latest'
 
-# Pipeline parameters to select which image to build
-parameters:
-- name: imageType
-  displayName: 'Select Image Type to Build'
-  type: string
-  default: 'Linux'
-  values:
-  - Linux
-  - Windows
-
 variables:
-  resourceGroupName: 'your-resource-group'
-  location: 'eastus'
-  linuxImageTemplateName: 'linuxImageTemplate'
-  windowsImageTemplateName: 'windowsImageTemplate'
-  linuxTemplateFile: 'linux-image-builder-template.json'
-  windowsTemplateFile: 'windows-image-builder-template.json'
-  linuxScriptPath: '$(Build.SourcesDirectory)/scripts/install_linux.sh'
-  windowsScriptPath: '$(Build.SourcesDirectory)/scripts/install_windows.ps1'
+  resourceGroupName: 'myResourceGroup'  # Replace with your Resource Group
+  imageGalleryName: 'myImageGallery'    # Replace with your Image Gallery name
+  imageDefinitionName: 'myImageDef'     # Replace with your Image Definition name
+  imageVersion: '1.0.0'                 # Replace with your Image Version
+  location: 'eastus'                    # Replace with your Location
+  storageAccountName: 'mystorageacct'   # Replace with your Storage Account
+  customScriptPath: 'custom-script.ps1' # Replace with your PowerShell script path
 
 steps:
 
-# Checkout the repository to access the JSON template and scripts
-- task: Checkout@2
-  inputs:
-    clean: true
+# Checkout the code repository
+- checkout: self
 
-# Conditionally build and distribute the Linux image
-- script: |
-    echo "Replacing Linux script path in JSON template..."
-    sed -i 's|{{linuxScriptPath}}|'$linuxScriptPath'|g' $(linuxTemplateFile)
-  condition: eq('${{ parameters.imageType }}', 'Linux')
-
+# Upload the custom script to the storage account
 - task: AzureCLI@2
-  displayName: 'Create Linux Image Template'
-  condition: eq('${{ parameters.imageType }}', 'Linux')
   inputs:
-    azureSubscription: 'AzureSPConnection'  # Replace with your SP connection
+    azureSubscription: 'MyServiceConnection'   # Service connection name
     scriptType: 'bash'
     scriptLocation: 'inlineScript'
     inlineScript: |
-      echo "Creating resource group for Linux..."
-      az group create --name $(resourceGroupName) --location $(location)
+      az storage blob upload \
+        --account-name $(storageAccountName) \
+        --container-name imagescripts \
+        --name $(customScriptPath) \
+        --file $(customScriptPath)
 
-      echo "Creating Linux Image Builder template..."
-      az resource create \
-        --resource-group $(resourceGroupName) \
-        --properties @$(linuxTemplateFile) \
-        --is-full-object \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(linuxImageTemplateName)
-
-      echo "Running Linux image build..."
-      az resource invoke-action \
-        --resource-group $(resourceGroupName) \
-        --action Run \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(linuxImageTemplateName)
-
-# Conditionally build and distribute the Windows image
-- script: |
-    echo "Replacing Windows script path in JSON template..."
-    sed -i 's|{{windowsScriptPath}}|'$windowsScriptPath'|g' $(windowsTemplateFile)
-  condition: eq('${{ parameters.imageType }}', 'Windows')
-
-- task: AzureCLI@2
-  displayName: 'Create Windows Image Template'
-  condition: eq('${{ parameters.imageType }}', 'Windows')
+# Azure Image Builder Task to create the custom image using Windows Server 2019
+- task: AzureImageBuilder@0
   inputs:
-    azureSubscription: 'AzureSPConnection'  # Replace with your SP connection
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      echo "Creating resource group for Windows..."
-      az group create --name $(resourceGroupName) --location $(location)
+    azureSubscription: 'MyServiceConnection'   # Service connection name
+    resourceGroupName: $(resourceGroupName)
+    location: $(location)
+    buildTimeoutInMinutes: 120
+    imageTemplate:
+      imageTemplateName: 'windowsImageTemplate' # Image Template name
+      source:
+        type: 'PlatformImage'                   # Using platform (marketplace) image
+        imageReference:
+          publisher: 'MicrosoftWindowsServer'
+          offer: 'WindowsServer'
+          sku: '2019-Datacenter'
+          version: 'latest'
+      customize:
+        - type: 'powershell'                    # Use PowerShell script for customization
+          scriptUri: 'https://$(storageAccountName).blob.core.windows.net/imagescripts/$(customScriptPath)'  # Custom PowerShell script uploaded to storage
+      distribute:
+        - type: 'SharedImageGallery'
+          galleryImageId: '/subscriptions/<subscription-id>/resourceGroups/$(resourceGroupName)/providers/Microsoft.Compute/galleries/$(imageGalleryName)/images/$(imageDefinitionName)'
+          replicationRegions:
+            - $(location)
+          imageVersion: $(imageVersion)
 
-      echo "Creating Windows Image Builder template..."
-      az resource create \
-        --resource-group $(resourceGroupName) \
-        --properties @$(windowsTemplateFile) \
-        --is-full-object \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(windowsImageTemplateName)
-
-      echo "Running Windows image build..."
-      az resource invoke-action \
-        --resource-group $(resourceGroupName) \
-        --action Run \
-        --resource-type Microsoft.VirtualMachineImages/imageTemplates \
-        --name $(windowsImageTemplateName)
-
-
-=========
-
-install_linux.sh
-#!/bin/bash
-sudo apt-get update
-sudo apt-get install -y nginx
-
--=---
-install_windows.ps1
-
-# PowerShell script to install IIS
-Install-WindowsFeature -name Web-Server -IncludeManagementTools
+# Publish build artifacts (optional)
+- publish: $(Build.ArtifactStagingDirectory)
+  artifact: images
