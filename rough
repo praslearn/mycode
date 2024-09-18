@@ -12,6 +12,10 @@ variables:
   location: 'eastus'                    # Replace with your Location
   storageAccountName: 'mystorageacct'   # Replace with your Storage Account
   customScriptPath: 'custom-script.ps1' # Replace with your PowerShell script path
+  baseImagePublisher: 'MicrosoftWindowsServer'
+  baseImageOffer: 'WindowsServer'
+  baseImageSku: '2019-Datacenter'
+  baseImageVersion: 'latest'
 
 steps:
 
@@ -38,24 +42,22 @@ steps:
     resourceGroupName: $(resourceGroupName)
     location: $(location)
     buildTimeoutInMinutes: 120
-    imageTemplate:
-      imageTemplateName: 'windowsImageTemplate' # Image Template name
-      source:
-        type: 'PlatformImage'                   # Using platform (marketplace) image
-        imageReference:
-          publisher: 'MicrosoftWindowsServer'
-          offer: 'WindowsServer'
-          sku: '2019-Datacenter'
-          version: 'latest'
-      customize:
-        - type: 'powershell'                    # Use PowerShell script for customization
-          scriptUri: 'https://$(storageAccountName).blob.core.windows.net/imagescripts/$(customScriptPath)'  # Custom PowerShell script uploaded to storage
-      distribute:
-        - type: 'SharedImageGallery'
-          galleryImageId: '/subscriptions/<subscription-id>/resourceGroups/$(resourceGroupName)/providers/Microsoft.Compute/galleries/$(imageGalleryName)/images/$(imageDefinitionName)'
-          replicationRegions:
-            - $(location)
-          imageVersion: $(imageVersion)
+    source:
+      type: 'PlatformImage'                    # Using platform (marketplace) image
+      imageReference:
+        publisher: $(baseImagePublisher)
+        offer: $(baseImageOffer)
+        sku: $(baseImageSku)
+        version: $(baseImageVersion)
+    customize:
+      - type: 'powershell'                     # Use PowerShell script for customization
+        scriptUri: 'https://$(storageAccountName).blob.core.windows.net/imagescripts/$(customScriptPath)'  # Custom PowerShell script uploaded to storage
+    distribute:
+      - type: 'SharedImageGallery'
+        galleryImageId: '/subscriptions/<subscription-id>/resourceGroups/$(resourceGroupName)/providers/Microsoft.Compute/galleries/$(imageGalleryName)/images/$(imageDefinitionName)'
+        replicationRegions:
+          - $(location)
+        imageVersion: $(imageVersion)
 
 # Publish build artifacts (optional)
 - publish: $(Build.ArtifactStagingDirectory)
