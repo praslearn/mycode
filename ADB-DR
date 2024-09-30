@@ -1,1 +1,1099 @@
 https://chatgpt.com/share/66fad6da-abd0-800a-bf07-07622c8efd84
+==========
+To implement an **end-to-end disaster recovery strategy** for Azure Databricks with failover, you'll need to consider **high availability, data replication, and failover processes** across different Azure regions. Here’s a complete solution outline, including code where required:
+
+### **Disaster Recovery Strategy for Azure Databricks**
+
+#### 1. **Setup of Primary and Secondary Azure Databricks Workspaces**
+   - **Primary Databricks Workspace**: Located in the main Azure region.
+   - **Secondary Databricks Workspace**: Located in the disaster recovery region (secondary).
+
+#### 2. **Data Replication Across Regions**
+   - **Azure Blob Storage or ADLS**: Used as the data store for Azure Databricks. You'll need to replicate this storage across the two regions.
+   - **Azure Data Factory (ADF) or Azure Automation**: Can be used to orchestrate the replication of Delta tables or other data from the primary to the secondary workspace.
+
+   You can use **geo-redundant storage** (GRS) to automatically replicate data across Azure regions.
+
+#### 3. **Failover Mechanism**
+   - Automate the failover by monitoring the primary region for failures using **Azure Monitor** or **Azure Function**.
+   - Upon detecting a failure, the automation should switch all operations to the secondary workspace.
+
+#### 4. **Databricks Notebooks and Jobs Synchronization**
+   Use **Azure DevOps Pipelines** or **Databricks CLI** to sync notebooks and jobs between the primary and secondary Databricks workspaces. You can store your notebooks in Git repositories and automate the process.
+
+#### 5. **Network Configuration**
+   Ensure that your virtual networks (VNet) for both the primary and secondary Databricks are peered or part of the same VNet architecture to minimize latency.
+
+---
+
+### **Step-by-Step Solution**
+
+#### **1. Set up Storage Replication**
+   - Use **Azure Storage Accounts** with GRS or implement ADF pipelines for more granular control over data movement.
+   
+   **Blob Storage replication setup (Terraform example):**
+   ```hcl
+   resource "azurerm_storage_account" "primary_storage" {
+     name                     = "primarydatabricksstorage"
+     resource_group_name      = "primary_rg"
+     location                 = "PrimaryRegion"
+     account_tier             = "Standard"
+     account_replication_type = "GRS"
+   }
+   ```
+
+   **Replication Pipeline in ADF (JSON example)**:
+   ```json
+   {
+     "name": "ReplicateDatabricksData",
+     "properties": {
+       "activities": [
+         {
+           "type": "Copy",
+           "inputs": ["PrimaryStorageDataset"],
+           "outputs": ["SecondaryStorageDataset"],
+           "source": { "type": "BlobSource" },
+           "sink": { "type": "BlobSink" }
+         }
+       ]
+     }
+   }
+   ```
+
+#### **2. Sync Databricks Notebooks using Git**
+   - Link your Azure Databricks with a Git repo (e.g., Azure DevOps or GitHub) for both primary and secondary workspaces. Use pipelines to automatically sync changes.
+
+   **Databricks CLI Commands for Notebook Sync**:
+   ```bash
+   # Exporting notebooks from primary Databricks
+   databricks workspace export_dir /path/to/notebooks/ /local/dir/
+
+   # Importing notebooks to secondary Databricks
+   databricks workspace import_dir /local/dir/ /path/to/secondary/notebooks/
+   ```
+
+   **Azure DevOps YAML Pipeline Example for Notebooks Sync**:
+   ```yaml
+   trigger:
+   - main
+
+   pool:
+     vmImage: 'ubuntu-latest'
+
+   steps:
+   - checkout: self
+   - script: |
+       databricks workspace export_dir /notebooks/ /local_dir/
+       databricks workspace import_dir /local_dir/ /notebooks/
+     displayName: 'Sync Notebooks to Secondary Databricks'
+   ```
+
+#### **3. Automate Failover**
+
+   - Monitor the primary region using **Azure Monitor** or a custom script in an **Azure Function** to check for availability issues.
+
+   **Azure Function for Failover Trigger (Python Example)**:
+   ```python
+   import requests
+   from azure.identity import DefaultAzureCredential
+   from azure.mgmt.databricks import DatabricksManagementClient
+
+   def check_primary_databricks():
+       # Check the health of primary Databricks workspace
+       response = requests.get('<PrimaryDatabricksAPI>')
+       if response.status_code != 200:
+           trigger_failover()
+
+   def trigger_failover():
+       # Switch to secondary Databricks workspace
+       client = DatabricksManagementClient(DefaultAzureCredential(), '<SubscriptionID>')
+       workspace = client.workspaces.get('<SecondaryResourceGroup>', '<SecondaryWorkspaceName>')
+       # Logic to make secondary Databricks the active workspace
+   ```
+
+   Deploy this function and schedule it to run periodically.
+
+#### **4. Failback Process**
+   Once the primary region becomes available again, sync data from the secondary to the primary workspace and resume operations in the primary region.
+
+   **Azure Data Factory Pipeline for Failback**:
+   ```json
+   {
+     "name": "FailbackPipeline",
+     "properties": {
+       "activities": [
+         {
+           "type": "Copy",
+           "inputs": ["SecondaryStorageDataset"],
+           "outputs": ["PrimaryStorageDataset"],
+           "source": { "type": "BlobSource" },
+           "sink": { "type": "BlobSink" }
+         }
+       ]
+     }
+   }
+   ```
+
+#### **5. Networking Failover**
+   - Use **Azure Traffic Manager** to route traffic to the secondary region when the primary region is down.
+
+   **Azure Traffic Manager Setup Example (Terraform)**:
+   ```hcl
+   resource "azurerm_traffic_manager_profile" "example" {
+     name                = "example-tm-profile"
+     resource_group_name = "example-resources"
+     traffic_routing_method = "Priority"
+
+     dns_config {
+       relative_name = "example-app"
+       ttl           = 60
+     }
+
+     monitor_config {
+       protocol = "HTTPS"
+       port     = 443
+       path     = "/"
+     }
+
+     endpoint {
+       name                = "primary"
+       target_resource_id  = azurerm_databricks_workspace.primary.id
+       priority            = 1
+     }
+
+     endpoint {
+       name                = "secondary"
+       target_resource_id  = azurerm_databricks_workspace.secondary.id
+       priority            = 2
+     }
+   }
+   ```
+
+---
+
+### **Testing the Disaster Recovery**
+
+- **Simulate Failover**: Stop the primary Databricks or simulate a regional outage to trigger the failover.
+- **Validate Data Integrity**: Ensure data and notebook synchronization to the secondary workspace is consistent.
+- **Test Failback**: Once the primary is restored, verify that the failback process works correctly.
+
+---
+
+This solution provides an automated failover setup for Azure Databricks, ensuring high availability and disaster recovery across regions.
+
+
+
+
+
+
+===============
+
+If you don't want **Azure Data Factory (ADF)** to be part of the disaster recovery strategy for Azure Databricks, you can use alternatives like **Azure Storage Account replication**, **Databricks Jobs**, or **custom automation scripts**. Here's the updated solution without ADF:
+
+---
+
+### **Updated Disaster Recovery Strategy for Azure Databricks without ADF**
+
+#### **1. Setup of Primary and Secondary Databricks Workspaces**
+   - **Primary Databricks Workspace**: In the main region.
+   - **Secondary Databricks Workspace**: In the disaster recovery region.
+
+#### **2. Data Replication via Azure Blob Storage (Geo-Redundant Storage - GRS)**
+   Instead of ADF, you can use **Azure Blob Storage with Geo-Redundant Storage (GRS)** or **Geo-Zone Redundant Storage (GZRS)** to ensure that data in the primary region is automatically replicated to the secondary region.
+
+   **Steps:**
+   - Set up GRS or GZRS for your **Azure Blob Storage** or **Azure Data Lake Storage (ADLS)**.
+   - This ensures that all data used by Azure Databricks in the primary region is continuously replicated to the secondary region.
+
+   **Example of Azure Storage GRS Configuration (Terraform)**:
+   ```hcl
+   resource "azurerm_storage_account" "primary_storage" {
+     name                     = "primarydatabricksstorage"
+     resource_group_name      = "primary_rg"
+     location                 = "PrimaryRegion"
+     account_tier             = "Standard"
+     account_replication_type = "GRS" # or GZRS for zone redundancy
+   }
+   ```
+
+   - This setup will replicate the data in **blob containers**, **ADLS**, or **Delta tables** to the secondary region automatically, without requiring manual data movement tools.
+
+#### **3. Notebook and Job Synchronization**
+   **Databricks CLI** or **Databricks Jobs** can be used to synchronize notebooks and jobs between primary and secondary Databricks workspaces.
+
+   - **Option 1**: Use a Git-based workflow to keep notebooks synced between the two regions.
+   - **Option 2**: Use **Databricks Jobs** to automate the process.
+
+   **Databricks CLI Commands for Manual Sync**:
+   ```bash
+   # Exporting notebooks from the primary Databricks workspace
+   databricks workspace export_dir /path/to/notebooks/ /local/dir/
+
+   # Importing notebooks to the secondary Databricks workspace
+   databricks workspace import_dir /local/dir/ /path/to/secondary/notebooks/
+   ```
+
+   **Automating with Databricks Jobs**:
+   Create scheduled Databricks jobs that run periodically to export and import notebooks between the two workspaces. This can be done by setting up **Databricks Jobs** to invoke these CLI commands.
+
+#### **4. Failover Automation**
+
+   Use **Azure Monitor** to monitor the health of your primary Databricks workspace. If the primary fails, an **Azure Function** can be triggered to failover to the secondary workspace.
+
+   **Azure Function Example for Failover (Python)**:
+   ```python
+   import requests
+   from azure.identity import DefaultAzureCredential
+   from azure.mgmt.databricks import DatabricksManagementClient
+
+   def check_primary_health():
+       # Monitor health status of the primary Databricks workspace
+       response = requests.get('<PrimaryDatabricksHealthCheckAPI>')
+       if response.status_code != 200:
+           trigger_failover()
+
+   def trigger_failover():
+       # Switch to secondary Databricks workspace
+       client = DatabricksManagementClient(DefaultAzureCredential(), '<SubscriptionID>')
+       workspace = client.workspaces.get('<SecondaryResourceGroup>', '<SecondaryWorkspace>')
+       print("Failover to secondary Databricks initiated.")
+   ```
+
+   This function can be scheduled to run at regular intervals to ensure that the failover occurs automatically in case of any disruption.
+
+#### **5. Networking with Azure Traffic Manager**
+   Use **Azure Traffic Manager** to route traffic based on availability, ensuring that if the primary region fails, traffic is redirected to the secondary Databricks workspace.
+
+   **Azure Traffic Manager Setup (Terraform Example)**:
+   ```hcl
+   resource "azurerm_traffic_manager_profile" "example" {
+     name                = "example-tm-profile"
+     resource_group_name = "example-rg"
+     traffic_routing_method = "Priority"
+
+     dns_config {
+       relative_name = "databricks-app"
+       ttl           = 60
+     }
+
+     monitor_config {
+       protocol = "HTTPS"
+      
+
+```hcl
+       port     = 443
+       path     = "/"
+     }
+
+     endpoint {
+       name                = "primary"
+       target_resource_id  = azurerm_databricks_workspace.primary.id
+       priority            = 1
+     }
+
+     endpoint {
+       name                = "secondary"
+       target_resource_id  = azurerm_databricks_workspace.secondary.id
+       priority            = 2
+     }
+   }
+   ```
+
+   - This configuration ensures that the **primary Databricks workspace** is given priority under normal conditions. If the **primary region** goes down, **Azure Traffic Manager** will automatically route requests to the **secondary Databricks workspace**.
+
+#### **6. Failback Process**
+   Once the primary Databricks region is restored, you can switch operations back by:
+
+   - Syncing any new data from the secondary region to the primary region using the **GRS storage replication** setup.
+   - Syncing any updated notebooks from the secondary Databricks workspace back to the primary one using the same CLI commands or jobs.
+
+   The **Azure Function** can also be enhanced to handle the failback process when the primary region comes back online.
+
+---
+
+### **Key Components Recap:**
+1. **Data Replication**: Use **Azure Storage GRS/GZRS** to automatically replicate data between regions.
+2. **Notebook and Job Sync**: Automate syncing using **Databricks CLI** or **Databricks Jobs**.
+3. **Failover Monitoring**: Use **Azure Monitor** and **Azure Functions** to monitor and trigger failover.
+4. **Traffic Redirection**: Implement **Azure Traffic Manager** to reroute traffic based on region availability.
+5. **Failback Process**: Automatically or manually sync data and notebooks back to the primary region when it recovers.
+
+This strategy eliminates the need for **Azure Data Factory**, ensuring a simpler, fully automated disaster recovery process for your Azure Databricks setup.
+
+
+=================
+### **Step 3: Notebook and Job Synchronization**
+
+In the disaster recovery strategy for Azure Databricks, it's essential to keep the **notebooks**, **libraries**, and **jobs** synchronized between the **primary** and **secondary** Databricks workspaces. This ensures that in the event of a failover, you can continue working seamlessly in the secondary workspace without any loss of development work.
+
+Here’s a detailed explanation of the synchronization process:
+
+---
+
+### **Option 1: Git-Based Sync (Preferred Method)**
+
+1. **Version Control Integration**: 
+   - Databricks allows you to link your notebooks directly to a Git repository (e.g., **GitHub**, **Azure Repos**, or **GitLab**). By doing this, any changes made to notebooks in the primary Databricks workspace are automatically committed to your Git repository.
+   - Since the Git repo is external, it's easy to link the **secondary Databricks workspace** to the same repository. When a failover occurs, the secondary workspace will have access to the same codebase, and users can continue from where they left off.
+
+2. **Steps to Set Up Git Integration**:
+   - **Primary Workspace**: Connect the primary Databricks workspace to your Git repo. Commit changes regularly to ensure that all the latest notebook changes are version-controlled.
+   - **Secondary Workspace**: Configure the same Git repo in the secondary Databricks workspace. In case of failover, developers can pull the latest version of the notebooks from the repo.
+
+   **Advantages**:
+   - Changes are always version-controlled.
+   - The Git workflow provides history, tracking, and collaboration.
+   - Automated sync between primary and secondary through Git.
+
+3. **Sample Git Integration**:
+   - From the Databricks UI, navigate to the notebooks panel, and connect to the desired Git repository:
+     - Click on the **Git** icon.
+     - Select your repository.
+     - Sync your notebooks automatically to the Git repository.
+
+---
+
+### **Option 2: Automating Notebook Sync Using Databricks CLI**
+
+If you don't want to use Git, you can **manually or programmatically** export and import notebooks from the **primary** workspace to the **secondary** workspace using the **Databricks CLI**. This involves scheduling regular sync jobs to ensure that notebooks are mirrored in both workspaces.
+
+1. **Install Databricks CLI**:
+   - Install the Databricks CLI on a machine that has access to both the primary and secondary Databricks workspaces.
+   - Configure the CLI by authenticating using an **access token** for each workspace.
+
+   ```bash
+   databricks configure --token
+   ```
+
+2. **Export Notebooks from Primary Workspace**:
+   - Use the following command to export all notebooks from a directory in the primary workspace:
+   
+   ```bash
+   databricks workspace export_dir /primary/workspace/path /local/path --overwrite
+   ```
+
+   - This exports all the notebooks from the primary workspace to a local directory.
+
+3. **Import Notebooks into Secondary Workspace**:
+   - Once the notebooks are exported, import them into the secondary workspace using the following command:
+
+   ```bash
+   databricks workspace import_dir /local/path /secondary/workspace/path --overwrite
+   ```
+
+   - This ensures that the notebooks in the secondary workspace are always up to date with the primary workspace.
+
+4. **Automate the Sync Process**:
+   - You can automate this process by creating a **scheduled job** or script that runs periodically (e.g., daily or hourly). This job will export the latest notebooks from the primary workspace and import them into the secondary workspace.
+   - Use tools like **Azure DevOps Pipelines**, **Azure Functions**, or a simple **cron job** to automate this sync.
+
+5. **Sample Bash Script**:
+   Create a bash script that can be scheduled to run periodically.
+
+   ```bash
+   #!/bin/bash
+
+   # Export notebooks from primary
+   databricks workspace export_dir /primary/notebooks/ /local_dir/ --overwrite
+
+   # Import notebooks into secondary
+   databricks workspace import_dir /local_dir/ /secondary/notebooks/ --overwrite
+
+   echo "Notebook sync completed!"
+   ```
+
+   - Use **cron** or **Azure DevOps Pipeline** to schedule this script to run at regular intervals.
+
+---
+
+### **Option 3: Using Databricks Jobs for Syncing Notebooks**
+
+You can also use **Databricks Jobs** to automate notebook syncing. Create a job that runs regularly in the **primary Databricks workspace** to export notebooks, and another job in the **secondary workspace** to import them.
+
+1. **Primary Workspace Job**:
+   - A job in the primary workspace can trigger a **notebook export** using Databricks APIs or CLI. This can be done using a Python or shell script that exports the notebooks.
+
+2. **Secondary Workspace Job**:
+   - A corresponding job in the secondary workspace can trigger a **notebook import** using Databricks APIs or CLI.
+
+   **Job Example (Python API)**:
+   ```python
+   import os
+   from databricks_cli.sdk.api_client import ApiClient
+   from databricks_cli.workspace.api import WorkspaceApi
+
+   # Initialize Databricks client
+   api_client = ApiClient(host=os.getenv("DATABRICKS_HOST"), token=os.getenv("DATABRICKS_TOKEN"))
+   workspace_api = WorkspaceApi(api_client)
+
+   # Export notebooks from primary workspace
+   workspace_api.export_workspace("/notebooks", "/tmp/notebooks_backup", format="SOURCE")
+
+   # Import into secondary workspace
+   workspace_api.import_workspace("/tmp/notebooks_backup", "/secondary_notebooks", format="SOURCE", is_overwrite=True)
+   ```
+
+   - Schedule this Python script as a **Databricks job** in both the primary and secondary workspaces.
+
+---
+
+### **Why Synchronization is Crucial**
+
+- **Data Consistency**: Without consistent sync, if the primary workspace goes down and the failover occurs, there may be missing or outdated notebooks in the secondary workspace, causing potential delays or rework.
+- **Automation**: Automating the sync process ensures you’re always ready to failover without manual intervention.
+- **Seamless Continuity**: Users can continue working with the same notebooks in the secondary workspace, minimizing downtime.
+
+---
+
+### **Summary of Step 3 (Notebook and Job Sync)**
+
+- **Git Integration**: Easiest and most automated method, leveraging version control.
+- **Databricks CLI**: Allows manual export/import of notebooks between primary and secondary workspaces, can be automated with scripts.
+- **Databricks Jobs**: Fully automated syncing of notebooks using scheduled jobs in both primary and secondary workspaces.
+
+Each method ensures that your **notebooks and jobs** are up to date across both regions, ensuring minimal disruption during a failover.
+
+========================
+### **Explanation of Option 3: Databricks Jobs for Syncing Notebooks**
+
+In this option, we automate the process of exporting and importing notebooks between the **primary** and **secondary Databricks workspaces** using **Databricks Jobs**. The goal is to ensure that the notebooks are always synchronized, so that in case of failover, the secondary workspace has an updated copy of the notebooks from the primary workspace.
+
+Here’s a breakdown of the code used in **Option 3**, which relies on the **Databricks REST API** and **Python API** for programmatically exporting and importing notebooks.
+
+---
+
+### **Code Explanation**
+
+#### **1. Initialize Databricks API Client**
+
+The first step is to create an **API client** that communicates with the Databricks environment.
+
+```python
+import os
+from databricks_cli.sdk.api_client import ApiClient
+from databricks_cli.workspace.api import WorkspaceApi
+
+# Initialize Databricks client
+api_client = ApiClient(host=os.getenv("DATABRICKS_HOST"), token=os.getenv("DATABRICKS_TOKEN"))
+workspace_api = WorkspaceApi(api_client)
+```
+
+- **os.getenv("DATABRICKS_HOST")**: Retrieves the URL of the Databricks workspace. This is set as an environment variable, e.g., `https://<databricks-instance>.azuredatabricks.net`.
+- **os.getenv("DATABRICKS_TOKEN")**: Retrieves the Databricks API token, which is used for authentication. This token can be generated from the Databricks UI (Admin settings → User settings → Access tokens).
+- **ApiClient**: This object is responsible for making authenticated API requests to the Databricks workspace.
+- **WorkspaceApi**: This is an interface provided by the **Databricks CLI SDK**, which allows you to interact with the **Databricks Workspace API**.
+
+#### **2. Export Notebooks from the Primary Workspace**
+
+The `export_workspace` function exports the notebooks from the **primary Databricks workspace** into a local directory on the machine where the script is running.
+
+```python
+# Export notebooks from primary workspace
+workspace_api.export_workspace("/notebooks", "/tmp/notebooks_backup", format="SOURCE")
+```
+
+- **`"/notebooks"`**: The source path in the primary workspace from where the notebooks will be exported. This is the directory path in the Databricks workspace where the notebooks are stored.
+- **`"/tmp/notebooks_backup"`**: The local directory (on the machine running the script) where the exported notebooks will be saved temporarily.
+- **`format="SOURCE"`**: Specifies the format in which the notebooks will be exported. **SOURCE** format exports the raw notebook content in a script format (`.py`, `.scala`, `.sql` depending on the notebook language).
+
+**What this does**: The command extracts all the notebooks from the primary workspace directory (`/notebooks`) and stores them temporarily on the local system in the `/tmp/notebooks_backup` directory.
+
+#### **3. Import Notebooks into the Secondary Workspace**
+
+The `import_workspace` function is used to import the previously exported notebooks from the local system to the **secondary Databricks workspace**.
+
+```python
+# Import into secondary workspace
+workspace_api.import_workspace("/tmp/notebooks_backup", "/secondary_notebooks", format="SOURCE", is_overwrite=True)
+```
+
+- **`"/tmp/notebooks_backup"`**: The local directory where the notebooks were exported from the primary workspace.
+- **`"/secondary_notebooks"`**: The destination path in the **secondary Databricks workspace** where the notebooks will be imported. This is a folder in the secondary workspace that will store the same notebooks as in the primary workspace.
+- **`format="SOURCE"`**: Specifies that the notebooks are imported in their original script format.
+- **`is_overwrite=True`**: Ensures that if any notebooks with the same name exist in the secondary workspace, they will be overwritten with the latest versions from the primary workspace.
+
+**What this does**: The command uploads all the notebooks from the local backup directory (`/tmp/notebooks_backup`) to the secondary Databricks workspace under the directory `/secondary_notebooks`.
+
+---
+
+### **How This Works in a Job Automation Context**
+
+You can create two **Databricks jobs**:
+
+1. **Primary Workspace Job**:
+   - This job runs the Python script (above) periodically to export notebooks from the **primary workspace** to a local directory.
+   - It can be scheduled at a regular interval (e.g., daily or hourly), ensuring that the latest versions of notebooks are always exported.
+
+2. **Secondary Workspace Job**:
+   - This job runs the same script to import the exported notebooks into the **secondary workspace**.
+   - It can be triggered after the export completes (e.g., via an automated pipeline or scheduling), ensuring that the secondary workspace stays in sync.
+
+### **Scheduling the Jobs**
+
+You can use the Databricks **Job Scheduler** to set up these jobs:
+
+1. **Primary Databricks Workspace**:
+   - Create a job that runs the export code daily or hourly.
+   - Set the job to run the script that exports notebooks from the primary workspace.
+
+2. **Secondary Databricks Workspace**:
+   - Create a separate job that runs the import code shortly after the export job finishes.
+   - This ensures that the notebooks are imported into the secondary workspace right after being exported.
+
+---
+
+### **Benefits of Using Databricks Jobs for Syncing**
+
+- **Automated Sync**: By leveraging Databricks Jobs, the entire process of exporting and importing notebooks becomes automated. There’s no need for manual intervention, reducing the chances of human error.
+- **Up-to-date Failover Environment**: Since the notebooks in the secondary workspace are always in sync with the primary workspace, if a disaster happens, you can immediately switch over to the secondary environment without missing any critical updates.
+- **Flexibility**: You can adjust the frequency of syncing to match your business needs (e.g., daily, hourly, or in real-time).
+- **Seamless Failover**: When a failover occurs, the notebooks in the secondary region are already synced, and users can continue their work without disruption.
+
+---
+
+### **Summary of Option 3 Code**
+
+- **Step 1**: Initialize the Databricks API client by providing the API token and host URL.
+- **Step 2**: Use the `export_workspace` function to export notebooks from the **primary workspace** to a local directory.
+- **Step 3**: Use the `import_workspace` function to import the exported notebooks into the **secondary workspace**.
+
+This solution provides a robust way to automate the synchronization of Databricks notebooks between regions, ensuring high availability and seamless disaster recovery for your Databricks environment.
+
+
+======
+You can run the **notebook sync script** in various environments, depending on your infrastructure and preferences. Below are the recommended places where you can run the script:
+
+### **1. Azure Databricks Jobs (Preferred Method)**
+
+Since this script is designed to work with Databricks, the ideal place to run it is inside a **Databricks job** in either the **primary** or **secondary** Databricks workspace. Databricks jobs are perfect for scheduling, automating, and running recurring tasks within your Databricks environment.
+
+#### **Steps to Set Up in Databricks Jobs:**
+
+1. **Upload the Python Script**:
+   - Upload the script into a notebook or a Python file in the Databricks workspace.
+   
+2. **Create a Job**:
+   - Go to the Databricks UI in either the primary or secondary workspace.
+   - Navigate to the **Jobs** section from the left-hand menu.
+   - Create a new job by selecting **Create Job** and provide a name for the job (e.g., "Notebook Sync Job").
+
+3. **Job Configuration**:
+   - **Task Type**: Select **Notebook** or **Python Script**, depending on whether you uploaded it as a notebook or Python file.
+   - **Cluster**: Choose an existing cluster or create a new one that will be used to run the job. Ensure the cluster has the appropriate permissions and configurations for API access.
+   - **Scheduling**: Set the frequency for running the job (e.g., every hour, day, or week).
+
+4. **Job Scheduling**:
+   - Schedule the job to run at regular intervals (e.g., daily or hourly), depending on how frequently you want the sync to occur.
+
+#### **Why Use Databricks Jobs?**
+- **Built-in Automation**: Databricks jobs are designed for automating such tasks with robust scheduling, logging, and monitoring features.
+- **High Availability**: Databricks clusters can be restarted as needed to ensure high availability for job execution.
+- **Integration**: Since the script interacts with the Databricks API, running it inside the same environment is more efficient.
+
+---
+
+### **2. Azure Function**
+
+Another option is to use an **Azure Function** to trigger and execute the script. This allows for a serverless, event-driven approach that can scale according to demand.
+
+#### **Steps to Set Up in Azure Function:**
+
+1. **Create an Azure Function**:
+   - Use **Python** as the runtime stack when creating the Azure Function.
+   - Set up an HTTP-triggered function, which allows the function to be triggered based on specific events or a timer.
+
+2. **Upload the Script**:
+   - Deploy the Python sync script to the Azure Function. The function can run the script when triggered, either via an event or based on a time schedule (using a **Timer Trigger**).
+
+3. **Add Environment Variables**:
+   - Add the **Databricks host** and **API token** as environment variables in the Azure Function settings.
+
+4. **Schedule the Function**:
+   - Use a **Timer Trigger** to schedule the function to run at regular intervals. This can be configured using CRON expressions to match your desired sync frequency.
+
+#### **Why Use Azure Function?**
+- **Serverless Execution**: Azure Functions scale automatically and can execute based on events or time triggers.
+- **Cost-Effective**: Since it only runs when needed, it's cost-efficient for periodic tasks.
+- **Scalability**: Azure Functions can easily scale out as needed.
+
+---
+
+### **3. Azure DevOps Pipeline**
+
+You can also use an **Azure DevOps Pipeline** to execute the Python script as part of a CI/CD pipeline. This approach is beneficial if you’re already using Azure DevOps for other automation tasks and want to integrate notebook synchronization into your pipeline workflows.
+
+#### **Steps to Set Up in Azure DevOps:**
+
+1. **Create a New Pipeline**:
+   - Go to **Azure DevOps** and create a new **pipeline**.
+   - Choose the repository where your Python sync script is located.
+
+2. **Define a Pipeline Job**:
+   - Define a job in the YAML pipeline configuration to run the Python script.
+   - Add a **Python environment** to the pipeline and configure it to execute the notebook sync script.
+
+3. **Set Up Authentication**:
+   - Pass the **Databricks host** and **API token** as pipeline environment variables or secrets using Azure DevOps **variable groups** or **Key Vault**.
+
+4. **Schedule the Pipeline**:
+   - Use the **scheduling feature** in Azure DevOps to set up a recurring run for the pipeline (e.g., every day or week).
+
+#### **Why Use Azure DevOps Pipeline?**
+- **Integrated with CI/CD**: If you're already using DevOps for other automation, it makes sense to integrate notebook syncing as part of a pipeline.
+- **Version Control**: The pipeline can be linked to your version-controlled repository (e.g., GitHub, Azure Repos).
+- **Visibility**: The pipeline provides detailed logs and visibility into each run.
+
+---
+
+### **4. Local Server (For Testing or Manual Sync)**
+
+If you prefer not to use Databricks Jobs, Azure Functions, or Azure DevOps, you can run the script on a **local server** or VM that has access to both the primary and secondary Databricks workspaces.
+
+#### **Steps to Run Locally:**
+
+1. **Install Dependencies**:
+   - Install the **Databricks CLI** and the **Databricks SDK** on your local server.
+   - Ensure you have access to both the primary and secondary Databricks workspaces via API tokens.
+
+2. **Run the Script**:
+   - Schedule the script using a **cron job** or a **task scheduler** to run the sync at regular intervals.
+
+3. **Automate with Cron**:
+   - On Linux or macOS, use a cron job to automate the script execution. For example, to run the script daily at midnight:
+     ```bash
+     0 0 * * * /path/to/your_script.sh
+     ```
+
+4. **Ensure Uptime**:
+   - If running on a local or on-premise server, make sure the server is highly available and can execute the job consistently.
+
+#### **Why Use a Local Server?**
+- **Control**: You have full control over the environment and execution.
+- **Manual Testing**: Good for testing the script before deploying it to a more automated solution like Databricks Jobs or Azure Functions.
+
+---
+
+### **Conclusion:**
+- **Databricks Jobs**: Recommended for an automated, seamless integration with Databricks. Best suited if you’re working entirely within Databricks.
+- **Azure Functions**: Suitable for a serverless, scalable, event-driven approach.
+- **Azure DevOps Pipelines**: Ideal if you're already using DevOps for automation and want to integrate the sync process into your CI/CD workflows.
+- **Local Server**: Useful for testing or if you prefer manual control over the sync process.
+
+Each method allows you to automate the synchronization process, ensuring the **secondary workspace** is always up-to-date and ready for failover in the event of a disaster.
+
+==================================
+
+Here’s a detailed explanation of how to automate the notebook synchronization between the **primary** and **secondary Databricks workspaces** using an **Azure DevOps Pipeline**. This method involves using a pipeline to export notebooks from the primary workspace and import them into the secondary workspace. We'll walk through setting up the pipeline, configuring the environment, and scheduling the sync process.
+
+### **Steps to Set Up Notebook Sync in Azure DevOps Pipeline**
+
+---
+
+### **1. Prerequisites**
+
+- **Databricks Access**: Ensure you have API tokens and host URLs for both the primary and secondary Databricks workspaces.
+- **Azure DevOps Project**: Set up an Azure DevOps project and create a repository if you don't already have one.
+- **Python Installed in Pipeline**: Ensure the pipeline agent has Python installed or add it in the pipeline steps.
+
+---
+
+### **2. Python Script for Notebook Sync**
+
+Create the following Python script that exports and imports notebooks between the Databricks workspaces.
+
+```python
+import os
+from databricks_cli.sdk.api_client import ApiClient
+from databricks_cli.workspace.api import WorkspaceApi
+
+# Initialize Databricks API clients for primary and secondary workspaces
+primary_api_client = ApiClient(
+    host=os.getenv("PRIMARY_DATABRICKS_HOST"), 
+    token=os.getenv("PRIMARY_DATABRICKS_TOKEN")
+)
+secondary_api_client = ApiClient(
+    host=os.getenv("SECONDARY_DATABRICKS_HOST"), 
+    token=os.getenv("SECONDARY_DATABRICKS_TOKEN")
+)
+
+primary_workspace_api = WorkspaceApi(primary_api_client)
+secondary_workspace_api = WorkspaceApi(secondary_api_client)
+
+# Export notebooks from primary workspace
+primary_workspace_api.export_workspace(
+    "/notebooks", "/tmp/notebooks_backup", format="SOURCE"
+)
+
+# Import notebooks into secondary workspace
+secondary_workspace_api.import_workspace(
+    "/tmp/notebooks_backup", "/secondary_notebooks", format="SOURCE", is_overwrite=True
+)
+
+print("Notebook sync complete between primary and secondary workspaces.")
+```
+
+- **Databricks CLI SDK**: You’ll need the Databricks CLI SDK for Python. This is installed via the pipeline's `pip` step (explained below).
+- **Environment Variables**: The script uses environment variables to hold the Databricks host URLs and API tokens. These will be provided securely in the Azure DevOps pipeline.
+
+---
+
+### **3. Storing Secrets (API Tokens) in Azure DevOps**
+
+Since API tokens should be kept secure, use **Azure DevOps Pipeline Secrets** to store sensitive information like the Databricks API tokens.
+
+#### Steps to store the tokens:
+1. **Navigate to Azure DevOps Project Settings**.
+2. Go to **Pipelines → Library**.
+3. Create a **new Variable Group** (e.g., `DatabricksTokens`).
+4. Add the following variables, marking them as secrets:
+   - `PRIMARY_DATABRICKS_TOKEN`: API token for the primary Databricks workspace.
+   - `SECONDARY_DATABRICKS_TOKEN`: API token for the secondary Databricks workspace.
+   - `PRIMARY_DATABRICKS_HOST`: Host URL for the primary Databricks workspace.
+   - `SECONDARY_DATABRICKS_HOST`: Host URL for the secondary Databricks workspace.
+
+---
+
+### **4. Azure DevOps Pipeline YAML Configuration**
+
+Create a pipeline YAML file (`azure-pipelines.yml`) in your repository to automate the notebook sync. Below is an example pipeline configuration that runs the Python script to sync notebooks between the two Databricks environments.
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main  # Trigger pipeline on main branch
+
+schedules:
+  - cron: "0 0 * * *"  # Schedule pipeline to run daily at midnight
+    displayName: 'Daily Notebook Sync'
+    branches:
+      include:
+        - main
+
+pool:
+  vmImage: 'ubuntu-latest'  # Use an Ubuntu agent for the job
+
+variables:
+  # Non-sensitive variables can be added directly
+  PRIMARY_DATABRICKS_HOST: $(PRIMARY_DATABRICKS_HOST)
+  SECONDARY_DATABRICKS_HOST: $(SECONDARY_DATABRICKS_HOST)
+
+steps:
+  # Step 1: Install Python dependencies
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.x'
+      addToPath: true
+
+  - script: |
+      python -m pip install --upgrade pip
+      pip install databricks-cli
+    displayName: 'Install Databricks CLI SDK'
+
+  # Step 2: Run Python script to sync notebooks
+  - task: PythonScript@0
+    inputs:
+      scriptSource: 'filePath'
+      scriptPath: 'scripts/notebook_sync.py'  # Path to your Python script
+
+  # Step 3: Inject secrets into environment variables
+  - script: |
+      export PRIMARY_DATABRICKS_TOKEN=$(PRIMARY_DATABRICKS_TOKEN)
+      export SECONDARY_DATABRICKS_TOKEN=$(SECONDARY_DATABRICKS_TOKEN)
+      export PRIMARY_DATABRICKS_HOST=$(PRIMARY_DATABRICKS_HOST)
+      export SECONDARY_DATABRICKS_HOST=$(SECONDARY_DATABRICKS_HOST)
+    displayName: 'Export Databricks Environment Variables'
+    env:
+      PRIMARY_DATABRICKS_TOKEN: $(PRIMARY_DATABRICKS_TOKEN)
+      SECONDARY_DATABRICKS_TOKEN: $(SECONDARY_DATABRICKS_TOKEN)
+      PRIMARY_DATABRICKS_HOST: $(PRIMARY_DATABRICKS_HOST)
+      SECONDARY_DATABRICKS_HOST: $(SECONDARY_DATABRICKS_HOST)
+
+  # Step 4: Execute the Python script
+  - script: python scripts/notebook_sync.py
+    displayName: 'Run Notebook Sync Script'
+    env:
+      PRIMARY_DATABRICKS_TOKEN: $(PRIMARY_DATABRICKS_TOKEN)
+      SECONDARY_DATABRICKS_TOKEN: $(SECONDARY_DATABRICKS_TOKEN)
+```
+
+### **Pipeline YAML Breakdown:**
+
+1. **Trigger**:
+   - The pipeline triggers on commits to the `main` branch.
+   - A cron job (`0 0 * * *`) is used to schedule the sync process **daily at midnight**. You can adjust this according to your needs.
+
+2. **Pool**:
+   - The pipeline runs on the `ubuntu-latest` agent to execute the tasks.
+
+3. **Steps**:
+   - **Install Python and Databricks CLI SDK**: A Python version is set up, and the required **Databricks CLI** is installed using `pip`.
+   - **Secrets Management**: Secrets (API tokens and host URLs) are securely passed into the pipeline using the `env` block from the Azure DevOps secret library.
+   - **Run the Sync Script**: The Python script (`notebook_sync.py`) is executed to handle the export/import operations.
+
+---
+
+### **5. Scheduling the Pipeline**
+
+In the YAML, the pipeline is scheduled to run **automatically every day** at midnight using the following cron expression:
+
+```yaml
+schedules:
+  - cron: "0 0 * * *"  # Schedule pipeline to run daily at midnight
+    displayName: 'Daily Notebook Sync'
+    branches:
+      include:
+        - main
+```
+
+You can adjust this expression to fit your preferred schedule (e.g., run hourly or weekly).
+
+---
+
+### **6. Running and Monitoring the Pipeline**
+
+Once the pipeline is set up:
+1. **Commit the YAML file** to the repository.
+2. The pipeline will automatically trigger based on the configured schedule or upon code changes.
+3. You can view the pipeline's execution logs in the **Pipelines → Runs** section in Azure DevOps to monitor the status of notebook synchronization.
+
+---
+
+### **Conclusion**
+
+By integrating notebook sync into Azure DevOps Pipelines, you get an automated, scalable, and secure solution for keeping Databricks notebooks in sync between primary and secondary workspaces. This method leverages the existing Azure DevOps infrastructure to provide visibility and control over the process, ensuring smooth disaster recovery preparedness.
+
+
+
+================
+
+To synchronize a **Databricks Repo** with an **Azure DevOps (ADO) Repo**, you can set up a connection between Databricks and Azure DevOps via Git integration. Databricks provides native integration with version control systems like Azure DevOps, allowing you to sync code from your ADO repository directly into a Databricks Repo.
+
+Here’s an **end-to-end guide** to setting up the integration and syncing a Databricks Repo with your Azure DevOps Git repo.
+
+---
+
+### **Steps to Sync Databricks Repo with Azure DevOps Repo**
+
+### **1. Set Up Git Integration with Azure DevOps in Databricks**
+
+Before syncing, you need to link your Databricks workspace with your Azure DevOps account using personal access tokens.
+
+#### **Steps:**
+
+1. **Create an Azure DevOps Personal Access Token (PAT)**:
+   - Go to **Azure DevOps** and click on your profile picture in the top-right corner.
+   - Select **Personal Access Tokens**.
+   - Click on **New Token**, set the required scope (e.g., code read/write access), and create the token.
+   - Save the token somewhere secure as you will need it in Databricks.
+
+2. **Connect Databricks to Azure DevOps**:
+   - In your Databricks workspace, click on your profile icon and navigate to **User Settings**.
+   - In the **Git Integration** tab, choose **Azure DevOps Services** as the Git provider.
+   - Paste the **Personal Access Token (PAT)** from Azure DevOps into the token field and save it.
+   - Now, Databricks can access your Azure DevOps repositories.
+
+---
+
+### **2. Clone Azure DevOps Repo into Databricks Repo**
+
+Once the Git integration is set up, you can clone your Azure DevOps repository directly into Databricks.
+
+#### **Steps:**
+
+1. **Navigate to Databricks Repo**:
+   - In the Databricks UI, click on the **Repos** icon from the left navigation panel.
+
+2. **Create a New Repo**:
+   - In the Repos tab, click **Add Repo**.
+   - Choose **Azure DevOps Services** from the list of Git providers (since you’ve already integrated it with the PAT).
+
+3. **Clone the Azure DevOps Repository**:
+   - Enter the **clone URL** for the Azure DevOps repository.
+     - You can find the clone URL from your Azure DevOps repo by going to **Repos** > **Clone** > selecting **HTTPS**.
+     - The clone URL typically looks like this:
+       ```
+       https://dev.azure.com/your-org/your-project/_git/your-repo
+       ```
+   - Provide the necessary branch (e.g., `main` or `master`) and click **Create**.
+   - This action will clone the ADO repo into your Databricks Repo, allowing you to work on the notebooks or scripts directly from Databricks.
+
+4. **Verify the Repo**:
+   - Once the repo is added, you can see the list of folders, files, and notebooks from your Azure DevOps repository.
+   - You can now start working with these files in Databricks.
+
+---
+
+### **3. Syncing Changes between Databricks and Azure DevOps**
+
+The synchronization between Databricks and Azure DevOps is not fully automatic, but Databricks provides **Git commands** like pull, commit, push, and more to sync changes between the two environments.
+
+#### **Steps to Push Changes from Databricks to ADO**:
+
+1. **Make Changes in Databricks**:
+   - Open and edit the notebooks or code inside the cloned Databricks Repo.
+   - Databricks will track your changes, and you can commit and push these changes back to Azure DevOps.
+
+2. **Commit and Push to Azure DevOps**:
+   - Once you are done making changes, click on the **Git** icon on the top right of your notebook or file.
+   - Enter a **commit message** and click **Commit & Push**.
+   - Databricks will automatically push the changes to the corresponding branch in your Azure DevOps repository.
+
+#### **Steps to Pull Changes from Azure DevOps to Databricks**:
+
+1. **Fetch Latest Changes**:
+   - If someone else has made changes in the Azure DevOps repo and you want to pull these changes into your Databricks environment, click on the **Git** icon and choose **Pull**.
+   - This will fetch the latest changes from the Azure DevOps repo and update the files in your Databricks Repo.
+
+---
+
+### **4. Automating Syncing Using Azure DevOps Pipelines (Optional)**
+
+If you want to automate the synchronization of code changes between Azure DevOps and Databricks (for example, as part of a CI/CD pipeline), you can use an **Azure DevOps pipeline** to push changes from ADO to Databricks and vice versa.
+
+#### **Steps to Automate Sync via Azure DevOps Pipelines**:
+
+1. **Create a Databricks PAT (Personal Access Token)**:
+   - In Databricks, go to **User Settings** > **Access Tokens** and generate a new token.
+   - This token will allow the pipeline to push code to the Databricks workspace.
+
+2. **Set Up Azure DevOps Pipeline**:
+   - Create a pipeline in Azure DevOps that includes steps to sync the code from the ADO repo to Databricks.
+
+3. **Install Databricks CLI in the Pipeline**:
+   - Add a task to install the Databricks CLI in your pipeline to allow interaction with Databricks from the pipeline.
+
+4. **Use Databricks CLI for Syncing**:
+   - Use Databricks CLI commands like `databricks repos update` or `databricks repos pull` to automatically pull the latest changes from ADO to Databricks as part of the pipeline execution.
+
+---
+
+### **5. Example Pipeline YAML for ADO to Databricks Sync**
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.x'
+    addToPath: true
+
+- script: |
+    pip install databricks-cli
+    databricks configure --token <<EOF
+    https://<your-databricks-instance>
+    $(DATABRICKS_TOKEN)
+    EOF
+  displayName: 'Install Databricks CLI and Configure'
+
+- script: |
+    databricks repos update --repo-id 12345 --path /Repos/your-repo --branch main
+  displayName: 'Sync Repo from ADO to Databricks'
+```
+
+In this pipeline:
+- The **Databricks CLI** is installed.
+- The **Databricks workspace** is configured using the token stored in Azure DevOps as a secret.
+- The **repo sync** is triggered from the Azure DevOps pipeline.
+
+---
+
+### **Conclusion**
+
+With the above steps, you can easily sync a **Databricks Repo** with an **Azure DevOps repository**, enabling seamless collaboration between your teams. Changes made in Databricks can be pushed to Azure DevOps, and vice versa.
+
+
+===============
+
+The command `databricks repos update` is part of the **Databricks CLI** and is used to update the state of a Databricks Repo. When you connect a Databricks Repo to a version control system (like Azure DevOps or GitHub), you can use this command to pull the latest changes from a specific branch of the remote repository (such as from Azure DevOps) into your Databricks Repo.
+
+Here’s a detailed explanation of each part of the command:
+
+### **Command Breakdown:**
+
+```bash
+databricks repos update --repo-id 12345 --path /Repos/your-repo --branch main
+```
+
+#### **1. `databricks repos update`**
+   - This is the main command that updates an existing Databricks Repo by syncing it with the corresponding repository in the version control system (in this case, Azure DevOps).
+   - It essentially pulls the latest changes from the remote Git repository into the Databricks Repo.
+
+#### **2. `--repo-id 12345`**
+   - This flag specifies the **ID of the Databricks Repo** that you want to update.
+   - Every Databricks Repo has a unique `repo-id` assigned to it when it's created in Databricks.
+   - You can find the `repo-id` by listing the repos using the Databricks CLI (`databricks repos list`), or from the Databricks UI if available.
+   - This ID ensures the command updates the correct repository within your Databricks workspace.
+
+   **Example of getting repo-id**:
+   ```bash
+   databricks repos list
+   ```
+
+#### **3. `--path /Repos/your-repo`**
+   - This flag specifies the **path in your Databricks workspace** where the repository is located.
+   - The path typically follows the structure `/Repos/username/repo-name` or just `/Repos/repo-name` if the user context is simplified.
+   - This helps to identify where the local copy of the repository is stored inside Databricks.
+
+   **Example**:
+   ```bash
+   --path /Repos/my-username/my-databricks-repo
+   ```
+
+#### **4. `--branch main`**
+   - The `--branch` flag specifies the **branch of the repository** in the version control system (Azure DevOps) from which to pull updates.
+   - In this example, it’s set to `main`, meaning it will pull the latest commits from the `main` branch of the Azure DevOps repo.
+   - You can change this to another branch if you want to pull from a different one (e.g., `--branch develop`).
+
+   **Note**: The branch should match the one you’ve configured in your Azure DevOps repository, as it will pull the changes from that branch into Databricks.
+
+---
+
+### **How the Command Works:**
+
+1. **Identify the Databricks Repo**:
+   - The command uses the `repo-id` and `path` to locate the specific Databricks Repo you want to update.
+
+2. **Connect to the Azure DevOps Repo**:
+   - It connects to the version control system (Azure DevOps in this case) based on the repository's Git integration.
+
+3. **Pull Latest Changes**:
+   - It pulls the latest commits from the specified branch (`main` in this case) in the Azure DevOps repository.
+   - If there are any new changes (e.g., new code, notebook updates, etc.), they are synced into the Databricks Repo.
+
+4. **Update the Databricks Repo**:
+   - The Databricks Repo in your workspace is now in sync with the latest code from the Azure DevOps repository.
+
+---
+
+### **Why Use `databricks repos update`?**
+
+- **Version Control Integration**: It enables you to maintain consistency between your Databricks development environment and your Azure DevOps repository.
+- **Collaboration**: When multiple team members are working on a shared Databricks Repo, this command ensures everyone is working with the latest version of the code or notebooks.
+- **Automation**: You can use this command in automated pipelines (like Azure DevOps Pipelines) to automatically sync code changes from Azure DevOps into Databricks for CI/CD workflows.
+
+---
+
+### **Example Usage:**
+
+Let’s say you have a Databricks Repo called `my-databricks-repo` that is connected to an Azure DevOps repository, and you want to pull the latest changes from the `main` branch of the ADO repo. The command might look like this:
+
+```bash
+databricks repos update --repo-id 7890 --path /Repos/my-username/my-databricks-repo --branch main
+```
+
+This will:
+- Use `repo-id 7890` to identify the Databricks Repo.
+- Pull the latest changes from the `main` branch of the corresponding Azure DevOps repository.
+- Update the Databricks Repo located at `/Repos/my-username/my-databricks-repo`.
+
+By automating this process in a pipeline, you ensure that the Databricks environment is always in sync with the latest updates from Azure DevOps.
+
+=================
