@@ -1,0 +1,212 @@
+Here’s a comprehensive guide to implementing automated resource cleanup in Azure using Azure DevOps, Azure Policies, and custom scripts. The goal is to ensure that unused or underutilized resources are regularly identified and deleted, leading to cost savings.
+
+### **Step 1: Tagging Resources for Lifecycle Management**
+
+**Objective**: Ensure all resources are tagged during creation for easier identification of ownership, environment, and lifecycle management (e.g., auto-deletion).
+
+#### **Tagging Example**
+Use Azure Policy to enforce tagging on resource groups or individual resources:
+
+```json
+{
+  "mode": "Indexed",
+  "policyRule": {
+    "if": {
+      "field": "tags['environment']",
+      "equals": "[parameters('tagValue')]"
+    },
+    "then": {
+      "effect": "deny"
+    }
+  },
+  "parameters": {
+    "tagValue": {
+      "type": "String",
+      "metadata": {
+        "description": "The value of the 'environment' tag."
+      }
+    }
+  }
+}
+```
+
+**Steps**:
+1. **Create an Azure Policy**: Go to the Azure Portal > Policy > Definitions > Create a policy to enforce tags like `environment`, `owner`, and `expiry_date`.
+2. **Assign Policy**: Apply the policy to all resource groups or specific ones based on your project structure.
+3. **Pipeline Integration**: Use the `Azure CLI` or `PowerShell` task in Azure DevOps pipelines to ensure resources are tagged during provisioning.
+
+```yaml
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: '$(azureSubscription)'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az resource tag --resource-id "/subscriptions/$(subscriptionId)/resourceGroups/$(resourceGroup)" \
+      --tags environment=dev owner=team expiry_date=$(expiryDate)
+```
+
+### **Step 2: Identify Unused or Idle Resources**
+
+**Objective**: Automate the detection of idle or underutilized resources like VMs, disks, and databases.
+
+#### **Script for Unused Resource Identification**
+
+You can use PowerShell or CLI scripts to query Azure Resource Graph to find idle resources. Here's a PowerShell example to identify stopped VMs and unattached disks:
+
+```powershell
+# Find all stopped/deallocated VMs
+$stoppedVMs = Get-AzVM | Where-Object { $_.PowerState -eq "VM stopped" }
+
+# Find unattached managed disks
+$unattachedDisks = Get-AzDisk | Where-Object { $_.ManagedBy -eq $null }
+
+# Find idle SQL databases
+$idleDatabases = Get-AzSqlDatabase | Where-Object { $_.Edition -eq "Standard" -and $_.DTU -lt 5 }
+
+# Output the list of unused resources
+$stoppedVMs
+$unattachedDisks
+$idleDatabases
+```
+
+#### **Automate the Script in Azure DevOps**:
+You can automate this script to run periodically (e.g., every week) using Azure DevOps pipelines.
+
+```yaml
+trigger:
+- schedule:
+  cron: "0 0 * * 0" # Runs every Sunday at midnight
+  displayName: Weekly Cleanup Check
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      $stoppedVMs = Get-AzVM | Where-Object { $_.PowerState -eq "VM stopped" }
+      $unattachedDisks = Get-AzDisk | Where-Object { $_.ManagedBy -eq $null }
+      $idleDatabases = Get-AzSqlDatabase | Where-Object { $_.Edition -eq "Standard" -and $_.DTU -lt 5 }
+      Write-Host "Stopped VMs: " $stoppedVMs
+      Write-Host "Unattached Disks: " $unattachedDisks
+      Write-Host "Idle Databases: " $idleDatabases
+```
+
+### **Step 3: Automate Resource Deallocation or Deletion**
+
+**Objective**: Automatically deallocate or delete identified unused resources after notifying the owner (if applicable).
+
+#### **Example of Deleting Unused Resources (PowerShell)**:
+This script will delete stopped VMs and unattached disks, after ensuring they are tagged for deletion.
+
+```powershell
+# Deallocate stopped VMs
+foreach ($vm in $stoppedVMs) {
+    if ($vm.Tags["expiry_date"] -lt (Get-Date)) {
+        Stop-AzVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Force
+        Remove-AzVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name
+        Write-Host "Deleted VM: " $vm.Name
+    }
+}
+
+# Remove unattached managed disks
+foreach ($disk in $unattachedDisks) {
+    if ($disk.Tags["expiry_date"] -lt (Get-Date)) {
+        Remove-AzDisk -ResourceGroupName $disk.ResourceGroupName -DiskName $disk.Name
+        Write-Host "Deleted Disk: " $disk.Name
+    }
+}
+```
+
+#### **Azure DevOps Pipeline for Resource Cleanup**:
+
+```yaml
+trigger: none
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: '$(azureSubscription)'
+    scriptType: 'pscore'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      # Deallocate or remove unused resources
+      $stoppedVMs = Get-AzVM | Where-Object { $_.PowerState -eq "VM stopped" }
+      $unattachedDisks = Get-AzDisk | Where-Object { $_.ManagedBy -eq $null }
+      
+      foreach ($vm in $stoppedVMs) {
+          if ($vm.Tags["expiry_date"] -lt (Get-Date)) {
+              Stop-AzVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Force
+              Remove-AzVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name
+          }
+      }
+
+      foreach ($disk in $unattachedDisks) {
+          if ($disk.Tags["expiry_date"] -lt (Get-Date)) {
+              Remove-AzDisk -ResourceGroupName $disk.ResourceGroupName -DiskName $disk.Name
+          }
+      }
+```
+
+### **Step 4: Notify Resource Owners Before Deletion**
+
+**Objective**: Notify the resource owner before deleting resources via Azure Logic Apps or Azure Functions.
+
+#### **Azure Logic Apps Workflow for Notifications**:
+1. Trigger Logic Apps on resource lifecycle events (using Azure Monitor alerts or resource tags).
+2. Send an email notification to the resource owner before deletion.
+
+#### **Azure Logic Apps Example**:
+- **Trigger**: Scheduled recurrence or an HTTP request from Azure DevOps.
+- **Action**: Send an email if the resource is tagged with an owner.
+
+```yaml
+- name: Notify Resource Owners
+  steps:
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: '$(azureSubscription)'
+      scriptType: 'bash'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        # Identify resources nearing expiry
+        $resources = Get-AzResource -Tag "expiry_date"
+        foreach ($resource in $resources) {
+          if ($resource.Tags["expiry_date"] -lt (Get-Date).AddDays(7)) {
+            # Call Logic Apps to send a notification
+            az rest --method post --uri "https://logicappworkflowuri" \
+            --body "{'resourceName': '$resource.Name', 'owner': '$resource.Tags['owner']'}"
+          }
+        }
+```
+
+### **Step 5: Implement Azure Policy for Expiration and Cleanup**
+
+**Objective**: Automatically enforce the deletion or deallocation of resources based on their expiry tags or idle state.
+
+#### **Azure Policy Example**:
+Create a policy that deletes resources based on the `expiry_date` tag.
+
+```json
+{
+  "if": {
+    "field": "tags['expiry_date']",
+    "less": "[utcNow()]"
+  },
+  "then": {
+    "effect": "delete"
+  }
+}
+```
+
+### **Benefits**:
+- **Cost Reduction**: Ensures no unused resources are accumulating, reducing unnecessary billing.
+- **Efficient Resource Management**: Automates the lifecycle management of cloud resources.
+- **Owner Accountability**: Resource owners are notified before deletion, reducing accidental data loss.
+
+By implementing these scripts and policies, you can automate the cleanup process, ensuring that your Azure environment is always optimized for cost efficiency.
